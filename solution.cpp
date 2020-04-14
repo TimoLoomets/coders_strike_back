@@ -116,11 +116,13 @@ int targetCounter = 0;
 std::vector<Vector> nextPoint;
 Vector lastLocation;
 Vector speed;
+Vector enemyLastLocation;
+Vector enemySpeed;
 
 void calculateNextPointVectors(){
     for(int i=0; i < checkpoints.size(); i++){
         int nextIndex = (i + 1) % checkpoints.size();
-        std::cerr << "Indexes " << i << " " << nextIndex << endl;
+        //std::cerr << "Indexes " << i << " " << nextIndex << endl;
         Vector toNext(checkpoints[i].first, checkpoints[i].second,
                       checkpoints[nextIndex].first, checkpoints[nextIndex].second);
         toNext.normalize();
@@ -158,13 +160,16 @@ void updateTargetCounter(std::pair<int, int> checkpoint){
     }
 }
 
-void updateSpeed(Vector currentLocation){
+void updateSpeed(Vector currentLocation, Vector enemyLocation){
     if(lastLocation == Vector(0, 0)){
         lastLocation = currentLocation;
+        enemyLastLocation = enemyLocation;
     } else {
         speed = currentLocation - lastLocation;
         lastLocation = currentLocation;
-        std::cerr << "Speed: " << speed.toString() << endl;
+        enemySpeed = enemyLocation - enemyLastLocation;
+        enemyLastLocation = enemyLocation;
+        std::cerr << "Speed: " << speed.toString() << " " << speed.length() << endl;
     }
 }
 
@@ -183,6 +188,13 @@ std::pair<int, int> getSpeedCorrectedTarget(Vector currentLocation, Vector targe
     return ((currentLocation + speed) + (targetSpeed * 2 - speed.normalizedValue()).normalizedValue() * 1000).toPoint();
 }
 
+bool collisionAboutToHappen(Vector location, Vector enemyLocation){
+    location = location + speed;
+    enemyLocation = enemyLocation + enemySpeed;
+    std::cerr << "Predicted collision dist: " << (location - enemyLocation).length() << endl;
+    return (location - enemyLocation).length() < 800;
+}
+
 int main()
 {
     bool boostUsed = false;
@@ -199,9 +211,10 @@ int main()
         
         std::pair<int, int> checkpoint = std::make_pair(nextCheckpointX, nextCheckpointY);
         Vector currentLocation(x, y);
+        Vector enemyCurrentLocation(opponentX, opponentY);
         updateCheckpoints(checkpoint);
         updateTargetCounter(checkpoint);
-        updateSpeed(currentLocation);
+        updateSpeed(currentLocation, enemyCurrentLocation);
         
         if(doneMapping){
             std::pair<int, int> target = getSpeedCorrectedTarget(currentLocation, Vector(getCorrectedTarget(325)));
@@ -223,7 +236,9 @@ int main()
         std::cerr << " enemy: " << enemyDistanceMultiplier << endl;
         std::cerr << "Target index: " << targetCounter << endl;
 
-        if(!boostUsed && (nextCheckpointDist >= 6500 && nextCheckpointAngle < 10 && nextCheckpointAngle > -10)){
+        if(collisionAboutToHappen(currentLocation, enemyCurrentLocation) && speed.length() > 350){
+            cout << nextCheckpointX << " " << nextCheckpointY << " SHIELD" << endl;
+        }else if(!boostUsed && (nextCheckpointDist >= 6500 && nextCheckpointAngle < 10 && nextCheckpointAngle > -10)){
             cout << nextCheckpointX << " " << nextCheckpointY << " BOOST" << endl;
             boostUsed = true;
         }else{
