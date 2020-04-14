@@ -30,6 +30,16 @@ static double pythDistance(int x1, int y1, int x2, int y2){
 
 class Vector{
     public:
+    Vector(){
+        Vector(0, 0);
+    }
+    
+    Vector(int x, int y): _x(x), _y(y){
+    }
+    
+    Vector(std::pair<int, int> vec): _x(vec.first), _y(vec.second){
+    }
+    
     Vector(double x, double y): _x(x), _y(y){
     }
     
@@ -46,9 +56,18 @@ class Vector{
     }
     
     void normalize(){
-        double length = pow(pow(_x, 2.0) + pow(_y, 2.0), 0.5);
+        double length = this->length();
         this->_x /= length;
         this->_y /= length;
+    }
+    
+    Vector normalizedValue(){
+        double length = pow(pow(_x, 2.0) + pow(_y, 2.0), 0.5);
+        return Vector(this->_x / length, this->_y / length);
+    }
+    
+    double length(){
+        return pow(pow(_x, 2.0) + pow(_y, 2.0), 0.5);
     }
     
     std::pair<int, int> toPoint(){
@@ -80,6 +99,10 @@ class Vector{
          return res; 
     }
     
+    bool operator == (Vector const &obj){
+        return abs(obj._x - this->_x) < 0.0001 && abs(obj._y - this->_y) < 0.0001;
+    }
+    
     private:
     double _x, _y;
 };
@@ -91,6 +114,8 @@ std::pair<int, int> prevCheckpoint;
 int targetCounter = 0;
 
 std::vector<Vector> nextPoint;
+Vector lastLocation;
+Vector speed;
 
 void calculateNextPointVectors(){
     for(int i=0; i < checkpoints.size(); i++){
@@ -115,11 +140,11 @@ void updateCheckpoints(std::pair<int, int> checkpoint){
     }
     
     
-    std::cerr << "Checkpoints: ";
+    /*std::cerr << "Checkpoints: ";
     for(auto point: checkpoints){
         std::cerr << point.first << ", " << point.second << " ; ";
     }
-    std::cerr << endl;
+    std::cerr << endl;*/
 }
 
 void updateTargetCounter(std::pair<int, int> checkpoint){
@@ -133,13 +158,29 @@ void updateTargetCounter(std::pair<int, int> checkpoint){
     }
 }
 
+void updateSpeed(Vector currentLocation){
+    if(lastLocation == Vector(0, 0)){
+        lastLocation = currentLocation;
+    } else {
+        speed = currentLocation - lastLocation;
+        lastLocation = currentLocation;
+        std::cerr << "Speed: " << speed.toString() << endl;
+    }
+}
+
 std::pair<int, int> getCorrectedTarget(int range){
-    std::cerr << "nextPoints: ";
+    /*std::cerr << "nextPoints: ";
     for(auto point: nextPoint){
         std::cerr << point.toString() << " ; ";
     }
-    std::cerr << endl;
+    std::cerr << endl;*/
     return (nextPoint[targetCounter] * range + checkpoints[targetCounter]).toPoint();
+}
+
+std::pair<int, int> getSpeedCorrectedTarget(Vector currentLocation, Vector target){
+    Vector targetSpeed = target - currentLocation;
+    targetSpeed.normalize();
+    return ((currentLocation + speed) + (targetSpeed * 2 - speed.normalizedValue()).normalizedValue() * 1000).toPoint();
 }
 
 int main()
@@ -157,31 +198,37 @@ int main()
         cin.ignore();
         
         std::pair<int, int> checkpoint = std::make_pair(nextCheckpointX, nextCheckpointY);
+        Vector currentLocation(x, y);
         updateCheckpoints(checkpoint);
         updateTargetCounter(checkpoint);
+        updateSpeed(currentLocation);
         
         if(doneMapping){
-            std::pair<int, int> target = getCorrectedTarget(300);
+            std::pair<int, int> target = getSpeedCorrectedTarget(currentLocation, Vector(getCorrectedTarget(325)));
             nextCheckpointX = target.first;
             nextCheckpointY = target.second;
             
+        } else if(speed.length() > 1) {
+            std::pair<int, int> target = getSpeedCorrectedTarget(currentLocation, Vector(checkpoint));
+            nextCheckpointX = target.first;
+            nextCheckpointY = target.second;
         }
         
-        double distanceMultiplier = clamp(pow(nextCheckpointDist, 2) / 5000000.0, 0.5, 1.0);
+        double distanceMultiplier = clamp(pow(nextCheckpointDist, 2) / 7000000.0, 0.5, 1.0);
         double angleMultiplier = clamp(pow(clamp(cos(deg2rad(nextCheckpointAngle)), 0.0, 1.0), 0.5), 0.25, 1.0);
-        double enemyDistanceMultiplier = pythDistance(x, y, opponentX, opponentY) < 2000 ? 2 : 1;
+        double enemyDistanceMultiplier = pythDistance(x, y, opponentX, opponentY) < 2000 ? 2.55 : 1;
         
         std::cerr << "Multipliers: dist:" << distanceMultiplier;
         std::cerr << " angle: " << angleMultiplier;
         std::cerr << " enemy: " << enemyDistanceMultiplier << endl;
         std::cerr << "Target index: " << targetCounter << endl;
 
-        if(!boostUsed && (nextCheckpointDist >= 6000 && nextCheckpointAngle < 10 && nextCheckpointAngle > -10)){
+        if(!boostUsed && (nextCheckpointDist >= 6500 && nextCheckpointAngle < 10 && nextCheckpointAngle > -10)){
             cout << nextCheckpointX << " " << nextCheckpointY << " BOOST" << endl;
             boostUsed = true;
         }else{
             cout << nextCheckpointX << " " << nextCheckpointY << " " 
-             << clamp((int) (100 * distanceMultiplier * angleMultiplier * enemyDistanceMultiplier), 15, 100) << endl;
+             << clamp((int) (100 * distanceMultiplier * angleMultiplier * enemyDistanceMultiplier), 10, 100) << endl;
         }
     }
 }
