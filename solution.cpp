@@ -14,10 +14,17 @@
 class Vector;
 class Pod;
 
+struct Progress{
+    int lap = 1;
+    int checkpoint = 0;
+    double distanceToNext;
+};
+
 std::vector<std::pair<int, int> > checkpoints;
 std::vector<Vector> nextPoint;
 std::unique_ptr<std::pair<Pod, Pod> > pods{};
 std::unique_ptr<std::pair<Pod, Pod> > enemyPods{};
+Pod * bestEnemy;
 int laps;
 
 static double deg2rad(double degrees){
@@ -89,7 +96,7 @@ class Vector{
     double angleFrom(double start){
         double angle = heading() - start;
         //std::cerr << "angle: " << angle << endl;
-        while(angle < -M_PI_2) angle += M_2_PI;
+        while(angle < 0) angle += M_2_PI;
         return angle;
     }
     
@@ -130,12 +137,18 @@ class Vector{
     double _x, _y;
 };
 
+
+
 class Pod{
     public:
     Vector location;
     Vector speed;
     double angle;
     int nextCheckPointId;
+    Progress progress;
+
+    enum Strategy{RACE, ATTACK};
+    Strategy strategy;
     
     Pod(): nextCheckPointId(1){
         static int podCount = 0;
@@ -144,24 +157,29 @@ class Pod{
     }
     
     std::string toString(){
-        return "Pod" + std::to_string(podId)
-                 + " to: " + std::to_string(nextCheckPointId)
-                 + " at: " + location.toString() + " " + std::to_string(angle)
-                 + " vel: " + speed.toString();
+        return "Pod" + std::to_string(podId) + " "
+               + std::to_string(progress.lap) + " "
+               + std::to_string(progress.checkpoint) + " "
+               + std::to_string(progress.distanceToNext) + " "
+               + std::to_string(speed.length()) + " "
+               + std::string(strategyToString(strategy));// + " "
+                 /*+ " to: " + std::to_string(nextCheckPointId)*/
+               /*+ " at: " + location.toString() + " " + std::to_string(angle)
+               + " vel: " + speed.toString();*/
     }
     
     std::string getAction(){
         //std::cerr << "Getting action of " << toString() << endl;
         static bool boostUsed = false;
         
-        Vector nextPointTarget = getNextPointCorrectedTarget(325);
+        Vector nextPointTarget = getTargetLocation();//getNextPointCorrectedTarget(325);
         //std::cerr << "Done calculating nextPointTarget " << nextPointTarget.toString() << endl;
         Vector target = getSpeedCorrectedTarget(nextPointTarget);
         //std::cerr << "Done calculating target " << target.toString() << endl;
         
         double nextCheckpointDist = target.length();
         double nextCheckpointAngle = nextPointTarget.angleFrom(angle);
-        std::cerr << "nextCheckpointAngle: " << nextCheckpointAngle << std::endl;
+        //std::cerr << "nextCheckpointAngle: " << nextCheckpointAngle << std::endl;
         
         double distanceMultiplier = clamp(pow(nextCheckpointDist, 2) / 7000000.0, 0.5, 1.0);
         double angleMultiplier = clamp(pow(clamp(cos(nextCheckpointAngle), 0.0, 1.0), 0.5), 0.25, 1.0);
@@ -170,10 +188,13 @@ class Pod{
         std::cerr << "Multipliers: dist:" << distanceMultiplier;
         std::cerr << " angle: " << angleMultiplier;
         std::cerr << " enemy: " << enemyDistanceMultiplier << std::endl;
-        std::cerr << "Target index: " << nextCheckPointId << std::endl;
+        //std::cerr << "Target index: " << nextCheckPointId << std::endl;
         
+        int thrust = (int) (100 * distanceMultiplier * angleMultiplier * enemyDistanceMultiplier);
+        if(strategy == Strategy::ATTACK && aboutToCollideFriendly()) thrust = 0;
         
         std::pair<int, int> targetPoint = target.toPoint();
+        //std::cerr << "Collision " << aboutToCollide() << " " << speed.length() << std::endl; 
         if(aboutToCollide() && speed.length() > 350){
             return std::to_string(targetPoint.first) + " " + std::to_string(targetPoint.second) + " SHIELD";
         }else if(!boostUsed && (nextCheckpointDist >= 6500 && abs(nextCheckpointAngle) < 0.175)){
@@ -182,27 +203,58 @@ class Pod{
         }else{
             return std::to_string(targetPoint.first) + " " 
                    + std::to_string(targetPoint.second) + " "
-                   + std::to_string(clamp((int) (100 
-                                                 * distanceMultiplier 
-                                                 * angleMultiplier 
-                                                 * enemyDistanceMultiplier), 
-                                          10, 
-                                          100));
+                   + std::to_string(clamp(thrust, 10, 100));
         }
+    }
+    
+    void updateProgress(){
+        if(nextCheckPointId == 1 && nextCheckPointId < progress.checkpoint){
+            //std::cerr << podId << " lap increment: " << nextCheckPointId << " " << progress.checkpoint << std::endl;
+            ++progress.lap;
+        }
+        progress.checkpoint = (nextCheckPointId - 1 + checkpoints.size()) % checkpoints.size();
+        progress.distanceToNext = (location - Vector(checkpoints[nextCheckPointId])).length();
+        /*std::cerr << "Progress: " << progress.lap << " " 
+                  << progress.checkpoint << " " 
+                  << progress.distanceToNext << std::endl;*/
+    }
+    
+    bool operator == (Pod const &obj){
+        return podId == obj.podId;
     }
     
     private:
     int podId;
     
+    char* strategyToString(Strategy v)
+    {
+        switch (v)
+        {
+            case RACE:   return "race";
+            case ATTACK:   return "attack";
+            default:      return "[Unknown strategy]";
+        }
+    }
+    
     Vector getNextPointCorrectedTarget(int range){
-        return (nextPoint[nextCheckPointId] * range + checkpoints[nextCheckPointId]).toPoint();
+        return progress.distanceToNext > speed.length() * 3.75 ? 
+                (nextPoint[nextCheckPointId] * range + checkpoints[nextCheckPointId]) :
+                (nextPoint[(nextCheckPointId + 1) % checkpoints.size()] 
+                 * range + checkpoints[(nextCheckPointId + 1) % checkpoints.size()]);
+    }
+    
+    Vector getBestEnemyTarget(){
+        /*std::cerr << "en loc: " << bestEnemy->location.toString() << " "
+                  << bestEnemy->speed.toString() << " "
+                  << (bestEnemy->location + bestEnemy->speed * 3).toString() << std::endl;*/
+        return bestEnemy->location + bestEnemy->speed * 3; //Vector(checkpoints[bestEnemy.nextCheckPointId]);
     }
     
     Vector getSpeedCorrectedTarget(Vector target){
         return ((location + speed) 
                  + ((target - location).normalizedValue() * 2 
                     - speed.normalizedValue()).normalizedValue() 
-                 * 7000);
+                 * 1000);
     }
     
     double closestEnemyDistance(){
@@ -212,11 +264,59 @@ class Pod{
     
     bool aboutToCollide(){
         Vector nextLocation = location + speed;
-        return std::min((nextLocation - enemyPods->first.location + enemyPods->first.speed).length(),
-                        (nextLocation - enemyPods->second.location + enemyPods->second.speed).length()) 
-               < 800;
+        return std::min((nextLocation - enemyPods->first.location - enemyPods->first.speed).length(),
+                        (nextLocation - enemyPods->second.location - enemyPods->second.speed).length()) 
+               < 850;
+    }
+    
+    bool aboutToCollideFriendly(){
+        return (pods->second.location + pods->second.speed 
+                - pods->first.location - pods->first.speed).length()
+               < 850;
+    }
+    
+    Vector getTargetLocation(){
+        switch(strategy){
+            case Pod::Strategy::RACE:
+                return getNextPointCorrectedTarget(325);
+            case Pod::Strategy::ATTACK:
+                return getBestEnemyTarget();
+        }
     }
 };
+
+std::pair<Pod, Pod> getOrderedPods(std::pair<Pod, Pod> toOrder){
+    Progress first = toOrder.first.progress;
+    Progress second = toOrder.second.progress;
+    if(second.lap > first.lap
+       || second.lap == first.lap
+          && second.checkpoint > first.checkpoint
+       || second.lap == first.lap
+          && second.checkpoint == first.checkpoint 
+          && second.distanceToNext < first.distanceToNext){
+        return std::make_pair(toOrder.second, toOrder.first);  
+    }
+    return toOrder;
+}
+
+void updatePodOrder(){
+    std::pair<Pod, Pod> ordered = getOrderedPods(*pods);
+    if(ordered.first == pods->first){
+        pods->first.strategy = Pod::Strategy::RACE;
+        pods->second.strategy = Pod::Strategy::ATTACK;
+    } else {
+        pods->first.strategy = Pod::Strategy::ATTACK;
+        pods->second.strategy = Pod::Strategy::RACE;
+    }
+    ordered = getOrderedPods(*enemyPods);
+    if(ordered.first == enemyPods->first){
+        bestEnemy = &(enemyPods->first);
+    } else {
+        bestEnemy = &(enemyPods->second);
+    }
+    
+    std::cerr << "Best enemy: " << bestEnemy->toString() << std::endl;
+}
 
 void calculateNextPointVectors(){
     for(int i=0; i < checkpoints.size(); i++){
@@ -245,6 +345,7 @@ void collectPodData(Pod* pod){
     pod->speed = Vector(vx, vy);
     std::cin >> pod->angle >> pod-> nextCheckPointId;
     pod->angle = deg2rad(pod->angle);
+    pod->updateProgress();
     //std::cerr << "Done updating " << pod->toString() << endl; 
 }
 
@@ -253,6 +354,11 @@ void updatePods(){
     collectPodData(&(pods->second));
     collectPodData(&(enemyPods->first));
     collectPodData(&(enemyPods->second));
+    updatePodOrder();
+    std::cerr << pods->first.toString() << std::endl;
+    std::cerr << pods->second.toString() << std::endl;
+    std::cerr << enemyPods->first.toString() << std::endl;
+    std::cerr << enemyPods->second.toString() << std::endl;
 }
 
 int main()
