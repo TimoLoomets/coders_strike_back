@@ -24,6 +24,7 @@ std::vector<std::pair<int, int> > checkpoints;
 std::vector<Vector> nextPoint;
 std::unique_ptr<std::pair<Pod, Pod> > pods{};
 std::unique_ptr<std::pair<Pod, Pod> > enemyPods{};
+bool boostUsed = false;
 Pod * bestEnemy;
 int laps;
 
@@ -79,12 +80,19 @@ class Vector{
         return length == 0.0 ? Vector(0, 0) : Vector(this->_x / length, this->_y / length);
     }
     
+    Vector rotatedValue(double angle){
+        double cosv = cos(angle);
+        double sinv = sin(angle);
+        return Vector(cosv * _x - sinv * _y, 
+                      sinv * _x + cosv * _y);
+    }
+    
     double length(){
         return pow(pow(_x, 2.0) + pow(_y, 2.0), 0.5);
     }
     
     double heading(){
-        return std::fmod(abs(atan2(_y, _x)) + _y < 0 ? M_PI : 0, M_2_PI);
+        return std::fmod(atan2(_y, _x) + M_2_PI, M_2_PI);
     }
     
     double angleTo(Vector end){
@@ -170,7 +178,6 @@ class Pod{
     
     std::string getAction(){
         //std::cerr << "Getting action of " << toString() << endl;
-        static bool boostUsed = false;
         
         Vector nextPointTarget = getTargetLocation();//getNextPointCorrectedTarget(325);
         //std::cerr << "Done calculating nextPointTarget " << nextPointTarget.toString() << endl;
@@ -198,8 +205,8 @@ class Pod{
         if(aboutToCollide() && speed.length() > 350){
             return std::to_string(targetPoint.first) + " " + std::to_string(targetPoint.second) + " SHIELD";
         }else if(!boostUsed && (nextCheckpointDist >= 6500 && abs(nextCheckpointAngle) < 0.175)){
-            return std::to_string(targetPoint.first) + " " + std::to_string(targetPoint.second) + " BOOST";
             boostUsed = true;
+            return std::to_string(targetPoint.first) + " " + std::to_string(targetPoint.second) + " BOOST";
         }else{
             return std::to_string(targetPoint.first) + " " 
                    + std::to_string(targetPoint.second) + " "
@@ -241,6 +248,25 @@ class Pod{
                 (nextPoint[nextCheckPointId] * range + checkpoints[nextCheckPointId]) :
                 (nextPoint[(nextCheckPointId + 1) % checkpoints.size()] 
                  * range + checkpoints[(nextCheckPointId + 1) % checkpoints.size()]);
+    }
+    
+    Vector getRacingLineCorrectedTarget(int range){
+        int targetCheckpointId = progress.distanceToNext > speed.length() * 3.75 ?
+                                 nextCheckPointId : 
+                                 (nextCheckPointId + 1) % checkpoints.size();
+        Vector targetCheckpoint = Vector(checkpoints[targetCheckpointId]);
+        Vector fromPod = (targetCheckpoint - location).normalizedValue();
+        Vector fromNextCheckpoint = (targetCheckpoint 
+                                     - Vector(checkpoints[(targetCheckpointId + 1) % checkpoints.size()]))
+                                    .normalizedValue();
+        double angleDiff = fromPod.angleTo(fromNextCheckpoint);
+        int sign = angleDiff != 0 ? angleDiff / abs(angleDiff) : 1;
+        Vector targetDisplacement = (fromPod + fromNextCheckpoint)
+                                    .rotatedValue(sign * M_PI_2)
+                                    .normalizedValue()
+                                    * range;
+        std::cerr << "displacement: " << targetDisplacement.toString() << std::endl;
+        return targetDisplacement + checkpoints[targetCheckpointId];
     }
     
     Vector getBestEnemyTarget(){
